@@ -69,12 +69,12 @@ func DefaultIpcPath() (string, error) {
 
 func selectAccount(clef ExternalSignerInterface, ethAddress *common.Address) (accounts.Account, error) {
 	// get the list of available ethereum accounts
-	clefAccounts := clef.Accounts()
+	clefAccounts := clef.Accounts()  // 获得 clef 中所有的账号
 	if len(clefAccounts) == 0 {
 		return accounts.Account{}, ErrNoAccounts
 	}
 
-	if ethAddress == nil {
+	if ethAddress == nil {  // 如果配置中没有设置钱包地址，则取 clef 中第一个钱包
 		// pick the first account as the one we use
 		return clefAccounts[0], nil
 	}
@@ -91,19 +91,19 @@ func selectAccount(clef ExternalSignerInterface, ethAddress *common.Address) (ac
 // If ethAddress is nil the account with index 0 will be selected. Otherwise it will verify the requested account actually exists.
 // As clef does not expose public keys it signs a test message to recover the public key.
 func NewSigner(clef ExternalSignerInterface, client Client, recoverFunc crypto.RecoverFunc, ethAddress *common.Address) (signer crypto.Signer, err error) {
-	account, err := selectAccount(clef, ethAddress)
+	account, err := selectAccount(clef, ethAddress)  // 就是向 clef 校验给的钱包在不在 clef 中
 	if err != nil {
 		return nil, err
 	}
 
 	// clef currently does not expose the public key
 	// sign some data so we can recover it
-	sig, err := clef.SignData(account, accounts.MimetypeTextPlain, clefRecoveryMessage)
+	sig, err := clef.SignData(account, accounts.MimetypeTextPlain, clefRecoveryMessage)  // 拿个消息给 clef 签个名
 	if err != nil {
 		return nil, err
 	}
 
-	pubKey, err := recoverFunc(sig, clefRecoveryMessage)
+	pubKey, err := recoverFunc(sig, clefRecoveryMessage)  // 根据签名结果拿到钱包对应的公钥
 	if err != nil {
 		return nil, err
 	}

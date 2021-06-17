@@ -320,7 +320,7 @@ func (c *command) configureSigner(cmd *cobra.Command, logger logging.Logger) (co
 			}
 		}
 
-		externalSigner, err := waitForClef(logger, 5, endpoint)
+		externalSigner, err := waitForClef(logger, 5, endpoint)  // ping 一下 clef
 		if err != nil {
 			return nil, err
 		}
@@ -348,7 +348,7 @@ func (c *command) configureSigner(cmd *cobra.Command, logger logging.Logger) (co
 			return nil, err
 		}
 
-		address, err = crypto.NewOverlayAddress(*publicKey, c.config.GetUint64(optionNameNetworkID))
+		address, err = crypto.NewOverlayAddress(*publicKey, c.config.GetUint64(optionNameNetworkID))  // 根据以太坊地址以及网络 id 得到一个 swarm 地址
 		if err != nil {
 			return nil, err
 		}
