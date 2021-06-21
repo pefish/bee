@@ -117,7 +117,7 @@ func (s *PushSync) Protocol() p2p.ProtocolSpec {
 
 // handler handles chunk delivery from other node and forwards to its destination node.
 // If the current node is the destination, it stores in the local store and sends a receipt.
-func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {
+func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {  // 转发数据或者接收数据
 	w, r := protobuf.NewWriterAndReader(stream)
 	ctx, cancel := context.WithTimeout(ctx, defaultTTL)
 	defer cancel()
@@ -197,17 +197,17 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 	span, _, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-handler", ps.logger, opentracing.Tag{Key: "address", Value: chunk.Address().String()})
 	defer span.Finish()
 
-	receipt, err := ps.pushToClosest(ctx, chunk, false)
+	receipt, err := ps.pushToClosest(ctx, chunk, false)  // 转发到离数据最近的节点，我要付钱。可能自己就是
 	if err != nil {
-		if errors.Is(err, topology.ErrWantSelf) {
+		if errors.Is(err, topology.ErrWantSelf) {  // 如果最近的节点的自己
 
-			if time.Now().Before(ps.warmupPeriod) {
+			if time.Now().Before(ps.warmupPeriod) {  // 多少间隔内是不能接收数据的
 				err = ErrWarmup
 				return
 			}
 
 			if !storedChunk {
-				_, err = ps.storer.Put(ctx, storage.ModePutSync, chunk)
+				_, err = ps.storer.Put(ctx, storage.ModePutSync, chunk)  // 存下数据
 				if err != nil {
 					return fmt.Errorf("chunk store: %w", err)
 				}
@@ -216,7 +216,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 			count := 0
 			// Push the chunk to some peers in the neighborhood in parallel for replication.
 			// Any errors here should NOT impact the rest of the handler.
-			err = ps.topologyDriver.EachNeighbor(func(peer swarm.Address, po uint8) (bool, bool, error) {
+			err = ps.topologyDriver.EachNeighbor(func(peer swarm.Address, po uint8) (bool, bool, error) {  // 收到后还要向自己的邻节点转发
 
 				// skip forwarding peer
 				if peer.Equal(p.Address) {
@@ -241,17 +241,17 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 					}()
 
 					// price for neighborhood replication
-					receiptPrice := ps.pricer.PeerPrice(peer, chunk.Address())
+					receiptPrice := ps.pricer.PeerPrice(peer, chunk.Address())  // 得到这个节点对数据的收费价格，每个chunk多少bzz
 
 					ctx, cancel := context.WithTimeout(context.Background(), timeToWaitForPushsyncToNeighbor)
 					defer cancel()
 
-					err = ps.accounting.Reserve(ctx, peer, receiptPrice)
+					err = ps.accounting.Reserve(ctx, peer, receiptPrice)  // 加个锁。这里可能会颁发支票（也就是链上结算）
 					if err != nil {
 						err = fmt.Errorf("reserve balance for peer %s: %w", peer.String(), err)
 						return
 					}
-					defer ps.accounting.Release(peer, receiptPrice)
+					defer ps.accounting.Release(peer, receiptPrice)  // 解锁
 
 					streamer, err := ps.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
 					if err != nil {
@@ -283,16 +283,16 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 					}
 
 					var receipt pb.Receipt
-					if err = r.ReadMsgWithContext(ctx, &receipt); err != nil {
+					if err = r.ReadMsgWithContext(ctx, &receipt); err != nil {  // 接收收据
 						return
 					}
 
-					if !chunk.Address().Equal(swarm.NewAddress(receipt.Address)) {
+					if !chunk.Address().Equal(swarm.NewAddress(receipt.Address)) {  // 如果收据不合法
 						// if the receipt is invalid, give up
 						return
 					}
 
-					err = ps.accounting.Credit(peer, receiptPrice, false)
+					err = ps.accounting.Credit(peer, receiptPrice, false)  // 给接收数据的节点增加我对他的欠款
 
 				}(peer)
 
@@ -308,11 +308,11 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 			}
 
 			// return back receipt
-			debit := ps.accounting.PrepareDebit(p.Address, price)
+			debit := ps.accounting.PrepareDebit(p.Address, price)  // 准备收款
 			defer debit.Cleanup()
 
-			receipt := pb.Receipt{Address: chunk.Address().Bytes(), Signature: signature}
-			if err := w.WriteMsgWithContext(ctx, &receipt); err != nil {
+			receipt := pb.Receipt{Address: chunk.Address().Bytes(), Signature: signature}  // 准备收据
+			if err := w.WriteMsgWithContext(ctx, &receipt); err != nil {  // 返回收据
 				return fmt.Errorf("send receipt to peer %s: %w", p.Address.String(), err)
 			}
 
@@ -322,7 +322,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 
 	}
 
-	debit := ps.accounting.PrepareDebit(p.Address, price)
+	debit := ps.accounting.PrepareDebit(p.Address, price)  // 准备收数据来源节点的钱
 	defer debit.Cleanup()
 
 	// pass back the receipt
@@ -330,7 +330,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 		return fmt.Errorf("send receipt to peer %s: %w", p.Address.String(), err)
 	}
 
-	return debit.Apply()
+	return debit.Apply()  // 收钱
 }
 
 // PushChunkToClosest sends chunk to the closest peer by opening a stream. It then waits for
@@ -364,7 +364,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllo
 
 	for i := maxAttempts; allowedRetries > 0 && i > 0; i-- {
 		// find the next closest peer
-		peer, err := ps.topologyDriver.ClosestPeer(ch.Address(), includeSelf, skipPeers...)
+		peer, err := ps.topologyDriver.ClosestPeer(ch.Address(), includeSelf, skipPeers...)  // 根据chunk的地址找到最近的节点，有可能返回自己是最近节点
 		if err != nil {
 			// ClosestPeer can return ErrNotFound in case we are not connected to any peers
 			// in which case we should return immediately.
@@ -383,7 +383,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllo
 			ctxd, canceld := context.WithTimeout(ctx, defaultTTL)
 			defer canceld()
 
-			r, attempted, err := ps.pushPeer(ctxd, peer, ch, retryAllowed)
+			r, attempted, err := ps.pushPeer(ctxd, peer, ch, retryAllowed)  // 转发过去。要付钱
 			// attempted is true if we get past accounting and actually attempt
 			// to send the request to the peer. If we dont get past accounting, we
 			// should not count the retry and try with a different peer again
@@ -464,7 +464,7 @@ func (ps *PushSync) pushPeer(ctx context.Context, peer swarm.Address, ch swarm.C
 	}
 
 	var receipt pb.Receipt
-	if err := r.ReadMsgWithContext(ctx, &receipt); err != nil {
+	if err := r.ReadMsgWithContext(ctx, &receipt); err != nil {  // 接收收据
 		_ = streamer.Reset()
 		return nil, true, fmt.Errorf("chunk %s receive receipt from peer %s: %w", ch.Address(), peer, err)
 	}
@@ -474,7 +474,7 @@ func (ps *PushSync) pushPeer(ctx context.Context, peer swarm.Address, ch swarm.C
 		return nil, true, fmt.Errorf("invalid receipt. chunk %s, peer %s", ch.Address(), peer)
 	}
 
-	err = ps.accounting.Credit(peer, receiptPrice, originated)
+	err = ps.accounting.Credit(peer, receiptPrice, originated)  // 付钱
 	if err != nil {
 		return nil, true, err
 	}

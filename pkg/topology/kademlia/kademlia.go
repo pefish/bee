@@ -1008,14 +1008,14 @@ func (k *Kad) ClosestPeer(addr swarm.Address, includeSelf bool, skipPeers ...swa
 			return false, false, nil
 		}
 
-		dcmp, err := swarm.DistanceCmp(addr.Bytes(), closest.Bytes(), peer.Bytes())
+		dcmp, err := swarm.DistanceCmp(addr.Bytes(), closest.Bytes(), peer.Bytes())  // 比较这个数据的内容地址是离自己近还是离这个peer近（这里是逻辑上的距离，并不是物理上的）
 		if err != nil {
 			return false, false, err
 		}
 		switch dcmp {
 		case 0:
 			// do nothing
-		case -1:
+		case -1:  // 这个 peer 更近，就把 closest 设置为这个 peer ，后面又继续比较，直到找出最近的 peer
 			// current peer is closer
 			closest = peer
 		case 1:

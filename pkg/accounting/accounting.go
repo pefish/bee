@@ -169,14 +169,14 @@ func (a *Accounting) Reserve(ctx context.Context, peer swarm.Address, price uint
 
 	a.metrics.AccountingReserveCount.Inc()
 
-	currentBalance, err := a.Balance(peer)
+	currentBalance, err := a.Balance(peer)  // 得到邻节点数据库中的余额
 	if err != nil {
 		if !errors.Is(err, ErrPeerNoBalance) {
 			return fmt.Errorf("failed to load balance: %w", err)
 		}
 	}
-	currentDebt := new(big.Int).Neg(currentBalance)
-	if currentDebt.Cmp(big.NewInt(0)) < 0 {
+	currentDebt := new(big.Int).Neg(currentBalance)  // 取相反数，就是这个节点的收益
+	if currentDebt.Cmp(big.NewInt(0)) < 0 {  // 如果数据库中的余额是个正数，说明没有收益，则置0
 		currentDebt.SetInt64(0)
 	}
 
@@ -211,7 +211,7 @@ func (a *Accounting) Reserve(ctx context.Context, peer swarm.Address, price uint
 
 	if increasedExpectedDebtReduced.Cmp(threshold) >= 0 && currentBalance.Cmp(big.NewInt(0)) < 0 {
 
-		err = a.settle(peer, accountingPeer)
+		err = a.settle(peer, accountingPeer)  // 颁发支票做链上结算
 		if err != nil {
 			return fmt.Errorf("failed to settle with peer %v: %v", peer, err)
 		}
@@ -249,7 +249,7 @@ func (a *Accounting) Release(peer swarm.Address, price uint64) {
 // Credit increases the amount of credit we have with the given peer
 // (and decreases existing debt).
 func (a *Accounting) Credit(peer swarm.Address, price uint64, originated bool) error {
-	accountingPeer := a.getAccountingPeer(peer)
+	accountingPeer := a.getAccountingPeer(peer)  // 目标节点
 
 	accountingPeer.lock.Lock()
 	defer accountingPeer.lock.Unlock()
@@ -262,11 +262,11 @@ func (a *Accounting) Credit(peer swarm.Address, price uint64, originated bool) e
 	}
 
 	// Calculate next balance by decreasing current balance with the price we credit
-	nextBalance := new(big.Int).Sub(currentBalance, new(big.Int).SetUint64(price))
+	nextBalance := new(big.Int).Sub(currentBalance, new(big.Int).SetUint64(price))  // 得到我欠他的新数量，是个负数
 
 	a.logger.Tracef("crediting peer %v with price %d, new balance is %d", peer, price, nextBalance)
 
-	err = a.store.Put(peerBalanceKey(peer), nextBalance)
+	err = a.store.Put(peerBalanceKey(peer), nextBalance)  // 保存到我的数据库中
 	if err != nil {
 		return fmt.Errorf("failed to persist balance: %w", err)
 	}
@@ -312,7 +312,7 @@ func (a *Accounting) Credit(peer swarm.Address, price uint64, originated bool) e
 }
 
 // Settle all debt with a peer. The lock on the accountingPeer must be held when
-// called.
+// called. 结算我跟这个邻节点之间的债务（时间结算+货币结算）
 func (a *Accounting) settle(peer swarm.Address, balance *accountingPeer) error {
 	now := a.timeNow().Unix()
 	timeElapsed := now - balance.refreshTimestamp
@@ -339,14 +339,14 @@ func (a *Accounting) settle(peer swarm.Address, balance *accountingPeer) error {
 			return err
 		}
 
-		acceptedAmount, timestamp, err := a.refreshFunction(context.Background(), peer, paymentAmount, shadowBalance)
+		acceptedAmount, timestamp, err := a.refreshFunction(context.Background(), peer, paymentAmount, shadowBalance)  // 时间结算。这里可能会将peer加入黑名单
 		if err != nil {
 			return fmt.Errorf("refresh failure: %w", err)
 		}
 
 		balance.refreshTimestamp = timestamp
 
-		oldBalance = new(big.Int).Add(oldBalance, acceptedAmount)
+		oldBalance = new(big.Int).Add(oldBalance, acceptedAmount)  // 更新这个节点的欠款，欠款减少了
 
 		a.logger.Tracef("registering refreshment sent to peer %v with amount %d, new balance is %d", peer, acceptedAmount, oldBalance)
 
@@ -377,12 +377,12 @@ func (a *Accounting) settle(peer swarm.Address, balance *accountingPeer) error {
 
 			paymentAmount := new(big.Int).Neg(originatedBalance)
 			// if the remaining debt is still larger than some minimum amount, trigger monetary settlement
-			if paymentAmount.Cmp(a.minimumPayment) >= 0 {
+			if paymentAmount.Cmp(a.minimumPayment) >= 0 {  // 如果欠这个peer的债务达到一个阈值，则发起链上支票
 				balance.paymentOngoing = true
 				// add settled amount to shadow reserve before sending it
 				balance.shadowReservedBalance.Add(balance.shadowReservedBalance, paymentAmount)
 				a.wg.Add(1)
-				go a.payFunction(context.Background(), peer, paymentAmount)
+				go a.payFunction(context.Background(), peer, paymentAmount)  // 货币结算。支付支票
 			}
 		}
 	}
@@ -390,7 +390,7 @@ func (a *Accounting) settle(peer swarm.Address, balance *accountingPeer) error {
 	return nil
 }
 
-// Balance returns the current balance for the given peer.
+// Balance returns the current balance for the given peer. 得到我对这个节点的欠款。负数表示我欠他的
 func (a *Accounting) Balance(peer swarm.Address) (balance *big.Int, err error) {
 	err = a.store.Get(peerBalanceKey(peer), &balance)
 
@@ -404,7 +404,7 @@ func (a *Accounting) Balance(peer swarm.Address) (balance *big.Int, err error) {
 	return balance, nil
 }
 
-// Balance returns the current balance for the given peer.
+// Balance returns the current balance for the given peer.  得到我对这个节点的欠款(直接可以链上发起支票结算的)。负数表示我欠他的
 func (a *Accounting) OriginatedBalance(peer swarm.Address) (balance *big.Int, err error) {
 	err = a.store.Get(originatedBalanceKey(peer), &balance)
 
@@ -863,7 +863,7 @@ func (a *Accounting) increaseBalance(peer swarm.Address, accountingPeer *account
 		if newSurplusBalance.Cmp(big.NewInt(0)) >= 0 {
 			a.logger.Tracef("surplus debiting peer %v with value %d, new surplus balance is %d", peer, price, newSurplusBalance)
 
-			err = a.store.Put(peerSurplusBalanceKey(peer), newSurplusBalance)
+			err = a.store.Put(peerSurplusBalanceKey(peer), newSurplusBalance)  // 增加对方节点对我的欠款，也就是我的收入
 			if err != nil {
 				return nil, fmt.Errorf("failed to persist surplus balance: %w", err)
 			}
@@ -890,7 +890,7 @@ func (a *Accounting) increaseBalance(peer swarm.Address, accountingPeer *account
 		}
 	}
 
-	currentBalance, err := a.Balance(peer)
+	currentBalance, err := a.Balance(peer)  // 得到我对这个节点的欠款。负数表示我欠他的
 	if err != nil {
 		if !errors.Is(err, ErrPeerNoBalance) {
 			return nil, fmt.Errorf("failed to load balance: %w", err)
@@ -924,7 +924,7 @@ func (d *debitAction) Apply() error {
 
 	cost := new(big.Int).Set(d.price)
 
-	nextBalance, err := d.accounting.increaseBalance(d.peer, d.accountingPeer, cost)
+	nextBalance, err := d.accounting.increaseBalance(d.peer, d.accountingPeer, cost)  // 结算
 	if err != nil {
 		return err
 	}

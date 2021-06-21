@@ -121,7 +121,7 @@ func (s *Service) ReceiveCheque(ctx context.Context, peer swarm.Address, cheque 
 	return s.accounting.NotifyPaymentReceived(peer, amount)
 }
 
-// Pay initiates a payment to the given peer
+// Pay initiates a payment to the given peer 货币结算。支付给目标支票
 func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int) {
 	var err error
 	defer func() {
@@ -143,7 +143,7 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int) 
 		return
 	}
 
-	balance, err := s.proto.EmitCheque(ctx, peer, beneficiary, amount, s.chequebook.Issue)
+	balance, err := s.proto.EmitCheque(ctx, peer, beneficiary, amount, s.chequebook.Issue)  // 签名并颁发支票
 
 	if err != nil {
 		return

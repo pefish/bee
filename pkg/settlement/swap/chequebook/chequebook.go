@@ -117,17 +117,17 @@ func (s *service) Balance(ctx context.Context) (*big.Int, error) {
 
 // AvailableBalance returns the token balance of the chequebook which is not yet used for uncashed cheques.
 func (s *service) AvailableBalance(ctx context.Context) (*big.Int, error) {
-	totalIssued, err := s.totalIssued()
+	totalIssued, err := s.totalIssued()  // 已经颁发出去的数量，包含了已经被提走的
 	if err != nil {
 		return nil, err
 	}
 
-	balance, err := s.Balance(ctx)
+	balance, err := s.Balance(ctx)  // 支票合约的余额
 	if err != nil {
 		return nil, err
 	}
 
-	totalPaidOut, err := s.contract.TotalPaidOut(ctx)
+	totalPaidOut, err := s.contract.TotalPaidOut(ctx)  // 已经被提走的数量
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (s *service) AvailableBalance(ctx context.Context) (*big.Int, error) {
 	// balance plus totalPaidOut is the total amount ever put into the chequebook (ignoring deposits and withdrawals which cancelled out)
 	// minus the total amount we issued from this chequebook this gives use the portion of the balance not covered by any cheques
 	availableBalance := big.NewInt(0).Add(balance, totalPaidOut)
-	availableBalance = availableBalance.Sub(availableBalance, totalIssued)
+	availableBalance = availableBalance.Sub(availableBalance, totalIssued)  // 得到合约余额里面除了已经颁发出去的之后的余额，也就是可以用来继续颁发的余额
 	return availableBalance, nil
 }
 
@@ -160,7 +160,7 @@ func (s *service) reserveTotalIssued(ctx context.Context, amount *big.Int) (*big
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	availableBalance, err := s.AvailableBalance(ctx)
+	availableBalance, err := s.AvailableBalance(ctx)  // 得到还有多少 bzz 可以用来颁发支票
 	if err != nil {
 		return nil, err
 	}
@@ -184,14 +184,14 @@ func (s *service) unreserveTotalIssued(amount *big.Int) {
 // The available balance which is available after sending the cheque is passed
 // to the caller for it to be communicated over metrics.
 func (s *service) Issue(ctx context.Context, beneficiary common.Address, amount *big.Int, sendChequeFunc SendChequeFunc) (*big.Int, error) {
-	availableBalance, err := s.reserveTotalIssued(ctx, amount)
+	availableBalance, err := s.reserveTotalIssued(ctx, amount)  // 先把这个数量给预留下来，相当于一个锁
 	if err != nil {
 		return nil, err
 	}
-	defer s.unreserveTotalIssued(amount)
+	defer s.unreserveTotalIssued(amount)  // 解除锁
 
 	var cumulativePayout *big.Int
-	lastCheque, err := s.LastCheque(beneficiary)
+	lastCheque, err := s.LastCheque(beneficiary)  // 得到我颁发给这个受益合约的上一个支票
 	if err != nil {
 		if err != ErrNoCheque {
 			return nil, err
@@ -202,20 +202,20 @@ func (s *service) Issue(ctx context.Context, beneficiary common.Address, amount 
 	}
 
 	// increase cumulativePayout by amount
-	cumulativePayout = cumulativePayout.Add(cumulativePayout, amount)
+	cumulativePayout = cumulativePayout.Add(cumulativePayout, amount)  // 新的数量累加到上一个支票中
 
 	// create and sign the new cheque
 	cheque := Cheque{
 		Chequebook:       s.address,
 		CumulativePayout: cumulativePayout,
 		Beneficiary:      beneficiary,
-	}
+	}  // 组成一个新的支票，准备签名颁发
 
 	sig, err := s.chequeSigner.Sign(&Cheque{
 		Chequebook:       s.address,
 		CumulativePayout: cumulativePayout,
 		Beneficiary:      beneficiary,
-	})
+	})  // 签名
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +224,7 @@ func (s *service) Issue(ctx context.Context, beneficiary common.Address, amount 
 	err = sendChequeFunc(&SignedCheque{
 		Cheque:    cheque,
 		Signature: sig,
-	})
+	})  // 颁发
 	if err != nil {
 		return nil, err
 	}

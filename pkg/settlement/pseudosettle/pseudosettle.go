@@ -188,19 +188,19 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 	pseudoSettlePeer.lock.Lock()
 	defer pseudoSettlePeer.lock.Unlock()
 
-	allowance, timestamp, err := s.peerAllowance(p.Address)
+	allowance, timestamp, err := s.peerAllowance(p.Address)  // 得到我对peer的欠款（本地数据库），以及当前时间
 	if err != nil {
 		return err
 	}
 
-	if allowance.Cmp(attemptedAmount) < 0 {
+	if allowance.Cmp(attemptedAmount) < 0 {  // 如果被请求支付的数量大于我对他的欠款，则只还所有欠款
 		paymentAmount.Set(allowance)
 		s.logger.Tracef("pseudosettle accepting reduced payment from peer %v of %d", p.Address, paymentAmount)
 	} else {
 		s.logger.Tracef("pseudosettle accepting payment message from peer %v of %d", p.Address, paymentAmount)
 	}
 
-	if paymentAmount.Cmp(big.NewInt(0)) < 0 {
+	if paymentAmount.Cmp(big.NewInt(0)) < 0 {  // 我对他的欠款是0
 		paymentAmount.Set(big.NewInt(0))
 	}
 
@@ -235,7 +235,7 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 	return s.accounting.NotifyRefreshmentReceived(p.Address, paymentAmount)
 }
 
-// Pay initiates a payment to the given peer
+// Pay initiates a payment to the given peer 时间结算
 func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int, checkAllowance *big.Int) (*big.Int, int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -282,7 +282,7 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int, 
 	s.logger.Tracef("pseudosettle sending payment message to peer %v of %d", peer, amount)
 	w, r := protobuf.NewWriterAndReader(stream)
 
-	err = w.WriteMsgWithContext(ctx, &pb.Payment{
+	err = w.WriteMsgWithContext(ctx, &pb.Payment{  // 催款
 		Amount: amount.Bytes(),
 	})
 	if err != nil {
@@ -292,19 +292,19 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int, 
 	checkTime := s.timeNow().Unix()
 
 	var paymentAck pb.PaymentAck
-	err = r.ReadMsgWithContext(ctx, &paymentAck)
+	err = r.ReadMsgWithContext(ctx, &paymentAck)  // 读取回复（回复就在handle函数），返回的是对方数据库中记录的欠我的数量以及对方机器的时间
 	if err != nil {
 		return nil, 0, err
 	}
 
 	acceptedAmount := new(big.Int).SetBytes(paymentAck.Amount)
-	if acceptedAmount.Cmp(amount) > 0 {
+	if acceptedAmount.Cmp(amount) > 0 {  // 对方还的数量太大，就是异常
 		err = fmt.Errorf("pseudosettle other peer %v accepted payment larger than expected", peer)
 		return nil, 0, err
 	}
 
 	experiencedInterval := checkTime - lastTime.CheckTimestamp
-	allegedInterval := paymentAck.Timestamp - lastTime.Timestamp
+	allegedInterval := paymentAck.Timestamp - lastTime.Timestamp  // 这次催款的时间(对方机器上的时间)减去上次催款的时间
 
 	if allegedInterval < 0 {
 		return nil, 0, ErrTimeOutOfSync
@@ -328,9 +328,9 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int, 
 		expectedAllowance = new(big.Int).Set(checkAllowance)
 	}
 
-	if expectedAllowance.Cmp(acceptedAmount) > 0 {
+	if expectedAllowance.Cmp(acceptedAmount) > 0 {  // 如果对方记录的欠我的数量太小（比 checkAllowance 小），则意味着对方赖账，就拉黑
 		// disconnect peer
-		err = s.p2pService.Blocklist(peer, 1*time.Hour)
+		err = s.p2pService.Blocklist(peer, 1*time.Hour)  // 添加到黑名单 1 个小时
 		if err != nil {
 			return nil, 0, err
 		}
